@@ -1,0 +1,856 @@
+import type {
+  CreateSessionResponse,
+  AppMeta,
+  AttachmentUpload,
+  ListMessagesResponse,
+  ListSessionsResponse,
+  Message,
+  PostMessageErrorResponse,
+  PostMessageSuccessResponse,
+  PostMessageStreamEvent,
+  Session,
+  ListWorkspaceFilesResponse,
+  WorkspaceFile,
+  WorkspaceFileContent,
+  WorkspaceFileContentResponse,
+  SessionWorkspaceInfo,
+  BrowseWorkspaceResponse,
+  ProviderOption,
+  DeployApplicationsResponse,
+  DeployConfigPayload,
+  DeployConfigResult,
+  DeployProjectsResponse,
+  DeployTestResponse,
+  DeployUploadResponse,
+  AuthUser,
+  LoginRequest,
+  LoginResponse,
+  MeResponse,
+  UserListResponse,
+  UserDetailResponse,
+  CreateUserRequest,
+  UpdateUserRequest,
+  ListUserAuthFilesResponse,
+  SaveUserAuthFileRequest,
+  UserAuthFileDetailResponse,
+  UserAuthFileSummary,
+  UserAuthFileDetail,
+} from "./types";
+
+export class ApiError<T = unknown> extends Error {
+  readonly status: number;
+  readonly body: T;
+
+  constructor(status: number, body: T, message?: string) {
+    super(message ?? `Request failed with status ${status}`);
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, {
+    headers: {
+      Accept: "application/json",
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+    },
+    credentials: "include",
+    ...init,
+  });
+
+  const hasBody = response.headers
+    .get("Content-Type")
+    ?.includes("application/json");
+  const data = hasBody ? await response.json() : null;
+
+  if (!response.ok) {
+    throw new ApiError(response.status, data);
+  }
+
+  return data as T;
+}
+
+export async function login(payload: LoginRequest): Promise<AuthUser> {
+  const data = await request<LoginResponse>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return data.user;
+}
+
+export async function logout(): Promise<void> {
+  await request<void>("/api/auth/logout", {
+    method: "POST",
+  });
+}
+
+export async function fetchCurrentUser(): Promise<AuthUser> {
+  const data = await request<MeResponse>("/api/auth/me");
+  return data.user;
+}
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  await request<void>("/api/auth/password", {
+    method: "POST",
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+}
+
+export async function fetchUsers(): Promise<AuthUser[]> {
+  const data = await request<UserListResponse>("/api/users");
+  return data.users;
+}
+
+export async function createUser(requestBody: CreateUserRequest): Promise<AuthUser> {
+  const data = await request<UserDetailResponse>("/api/users", {
+    method: "POST",
+    body: JSON.stringify(requestBody),
+  });
+  return data.user;
+}
+
+export async function updateUser(
+  userId: string,
+  requestBody: UpdateUserRequest,
+): Promise<AuthUser> {
+  const data = await request<UserDetailResponse>(`/api/users/${userId}`, {
+    method: "PUT",
+    body: JSON.stringify(requestBody),
+  });
+  return data.user;
+}
+
+export async function deleteUser(userId: string): Promise<void> {
+  await request<void>(`/api/users/${userId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function impersonateUser(userId: string): Promise<AuthUser> {
+  const data = await request<UserDetailResponse>(`/api/users/${userId}/impersonate`, {
+    method: "POST",
+  });
+  return data.user;
+}
+
+// Container management
+export async function createSessionContainer(sessionId: string): Promise<void> {
+  await request(`/api/sessions/${sessionId}/container/create`, {
+    method: "POST",
+  });
+}
+
+export async function getSessionContainerStatus(
+  sessionId: string,
+): Promise<{ status: string; url?: string; error?: string }> {
+  try {
+    return await request(`/api/sessions/${sessionId}/container/status`);
+  } catch (error) {
+    // If container doesn't exist (404), return a "not found" status instead of throwing
+    if (error instanceof ApiError && error.status === 404) {
+      return { status: "not_found" };
+    }
+    // For other errors, re-throw
+    throw error;
+  }
+}
+
+export async function getSessionContainerLogs(sessionId: string): Promise<{ logs: string }> {
+  return await request(`/api/sessions/${sessionId}/container/logs`);
+}
+
+export async function startSessionContainer(sessionId: string): Promise<void> {
+  await request(`/api/sessions/${sessionId}/container/start`, {
+    method: "POST",
+  });
+}
+
+export async function stopSessionContainer(sessionId: string): Promise<void> {
+  await request(`/api/sessions/${sessionId}/container/stop`, {
+    method: "POST",
+  });
+}
+
+export async function deleteSessionContainer(sessionId: string): Promise<void> {
+  await request(`/api/sessions/${sessionId}/container`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchUserAuthFiles(
+  userId: string,
+): Promise<UserAuthFileSummary[]> {
+  const data = await request<ListUserAuthFilesResponse>(
+    `/api/users/${userId}/auth-files`,
+  );
+  return data.files;
+}
+
+export async function saveUserAuthFile(
+  userId: string,
+  provider: UserAuthFileSummary["provider"],
+  fileName: string,
+  requestBody: SaveUserAuthFileRequest,
+): Promise<UserAuthFileDetail> {
+  const data = await request<UserAuthFileDetailResponse>(
+    `/api/users/${userId}/auth-files/${provider}/${encodeURIComponent(fileName)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(requestBody),
+    },
+  );
+  return data.file;
+}
+
+export async function deleteUserAuthFile(
+  userId: string,
+  provider: UserAuthFileSummary["provider"],
+  fileName: string,
+): Promise<void> {
+  await request<void>(
+    `/api/users/${userId}/auth-files/${provider}/${encodeURIComponent(fileName)}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
+export async function downloadUserAuthFile(
+  userId: string,
+  provider: UserAuthFileSummary["provider"],
+  fileName: string,
+): Promise<UserAuthFileDetail> {
+  const data = await request<UserAuthFileDetailResponse>(
+    `/api/users/${userId}/auth-files/${provider}/${encodeURIComponent(fileName)}`,
+  );
+  return data.file;
+}
+
+export async function fetchSessions(): Promise<Session[]> {
+  const data = await request<ListSessionsResponse>("/api/sessions");
+  return data.sessions;
+}
+
+const normalizeMessage = (message: Message): Message => ({
+  ...message,
+  attachments: message.attachments ?? [],
+  items: message.items ?? [],
+  responderProvider: message.responderProvider ?? null,
+  responderModel: message.responderModel ?? null,
+  responderReasoningEffort: message.responderReasoningEffort ?? null,
+});
+
+const normalizeReasoningEffort = (
+  value: string | undefined,
+): AppMeta["reasoningEffort"] => {
+  const normalized = value?.toLowerCase();
+  return normalized === "low" ||
+    normalized === "medium" ||
+    normalized === "high"
+    ? normalized
+    : "medium";
+};
+
+const normalizeReasoningEffortList = (
+  values: string[] | undefined,
+): AppMeta["reasoningEffort"][] => {
+  if (!Array.isArray(values)) {
+    return ["low", "medium", "high"];
+  }
+
+  const deduped = new Set<AppMeta["reasoningEffort"]>();
+  for (const value of values) {
+    deduped.add(normalizeReasoningEffort(value));
+  }
+
+  return deduped.size > 0 ? Array.from(deduped) : ["low", "medium", "high"];
+};
+
+const normalizeProvider = (value: string | undefined): AppMeta["provider"] => {
+  if (
+    value === "CodexSDK" ||
+    value === "ClaudeCodeSDK" ||
+    value === "DroidCLI" ||
+    value === "CopilotCLI" ||
+    value === "GeminiSDK"
+  ) {
+    return value;
+  }
+  return "CodexSDK";
+};
+
+const normalizeProviderList = (
+  values: string[] | undefined,
+): AppMeta["provider"][] => {
+  if (!Array.isArray(values)) {
+    return ["CodexSDK"];
+  }
+
+  const deduped = new Set<AppMeta["provider"]>();
+  for (const value of values) {
+    deduped.add(normalizeProvider(value));
+  }
+
+  return deduped.size > 0 ? Array.from(deduped) : ["CodexSDK"];
+};
+
+const PROVIDER_KEYS: ProviderOption[] = [
+  "CodexSDK",
+  "ClaudeCodeSDK",
+  "DroidCLI",
+  "CopilotCLI",
+  "GeminiSDK",
+];
+
+const DEFAULT_AVAILABLE_MODELS = ["gpt-5-codex", "gpt-5"];
+
+const normalizeModelArray = (values: unknown): string[] => {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  const trimmed = values
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+
+  return trimmed.length > 0 ? Array.from(new Set(trimmed)) : [];
+};
+
+const normalizeModelList = (
+  values: unknown,
+  fallback: string[],
+): string[] => {
+  const normalized = normalizeModelArray(values);
+  return normalized.length > 0 ? normalized : [...fallback];
+};
+
+const normalizeModelsByProvider = (
+  value: unknown,
+  fallbackModels: string[],
+): Record<ProviderOption, string[]> => {
+  const candidate =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const baseFallback =
+    fallbackModels.length > 0 ? fallbackModels : DEFAULT_AVAILABLE_MODELS;
+
+  const result: Record<ProviderOption, string[]> = {
+    CodexSDK: [],
+    ClaudeCodeSDK: [],
+    DroidCLI: [],
+    CopilotCLI: [],
+    GeminiSDK: [],
+  };
+
+  for (const provider of PROVIDER_KEYS) {
+    const rawList = provider in candidate ? candidate[provider] : undefined;
+    result[provider] = normalizeModelList(rawList, baseFallback);
+  }
+
+  return result;
+};
+
+type MetaResponsePayload = {
+  provider: string;
+  availableProviders: string[];
+  model: string;
+  reasoningEffort: string;
+  availableModels: string[];
+  availableReasoningEfforts: string[];
+  modelsByProvider?: Record<string, string[]>;
+};
+
+const normalizeMetaResponse = (data: MetaResponsePayload): AppMeta => {
+  const availableProviders = normalizeProviderList(data.availableProviders);
+  const availableReasoningEfforts = normalizeReasoningEffortList(
+    data.availableReasoningEfforts,
+  );
+
+  const availableModelsInput = Array.isArray(data.availableModels)
+    ? data.availableModels
+    : undefined;
+  const normalizedAvailableModels = normalizeModelList(
+    availableModelsInput,
+    DEFAULT_AVAILABLE_MODELS,
+  );
+
+  const modelsByProvider = normalizeModelsByProvider(
+    data.modelsByProvider,
+    normalizedAvailableModels,
+  );
+
+  const availableModels = Array.from(
+    new Set(
+      PROVIDER_KEYS.flatMap((provider) => modelsByProvider[provider]).concat(
+        normalizedAvailableModels,
+      ),
+    ),
+  );
+
+  const providerCandidate = normalizeProvider(data.provider);
+  const provider = availableProviders.includes(providerCandidate)
+    ? providerCandidate
+    : availableProviders[0] ?? "CodexSDK";
+
+  const providerModelOptions = modelsByProvider[provider];
+  const effectiveModelOptions =
+    providerModelOptions.length > 0 ? providerModelOptions : availableModels;
+
+  const model = effectiveModelOptions.includes(data.model)
+    ? data.model
+    : effectiveModelOptions[0] ?? (availableModels[0] ?? DEFAULT_AVAILABLE_MODELS[0]);
+
+  return {
+    provider,
+    availableProviders,
+    model,
+    reasoningEffort: normalizeReasoningEffort(data.reasoningEffort),
+    availableModels,
+    availableReasoningEfforts,
+    modelsByProvider,
+  };
+};
+
+export async function fetchMeta(): Promise<AppMeta> {
+  const data = await request<MetaResponsePayload>("/api/meta");
+  return normalizeMetaResponse(data);
+}
+
+export async function updateMeta(payload: {
+  model?: string;
+  reasoningEffort?: AppMeta["reasoningEffort"];
+  provider?: AppMeta["provider"];
+}): Promise<AppMeta> {
+  const data = await request<MetaResponsePayload>("/api/meta", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return normalizeMetaResponse(data);
+}
+
+export async function createSession(params?: {
+  title?: string;
+  githubRepo?: string;
+  gitBranch?: string;
+  customEnvVars?: Record<string, string>;
+  dockerfilePath?: string;
+  buildSettings?: Record<string, unknown>;
+}): Promise<Session> {
+  const data = await request<CreateSessionResponse>("/api/sessions", {
+    method: "POST",
+    body: params ? JSON.stringify(params) : undefined,
+  });
+
+  return data.session;
+}
+
+export async function getSessionSettings(sessionId: string): Promise<{
+  id: string;
+  sessionId: string;
+  githubRepo: string | null;
+  customEnvVars: Record<string, string>;
+  dockerfilePath: string | null;
+  buildSettings: Record<string, unknown>;
+  gitRemoteUrl: string | null;
+  gitBranch: string | null;
+  autoCommit: boolean;
+}> {
+  const data = await request<{ settings: {
+    id: string;
+    sessionId: string;
+    githubRepo: string | null;
+    customEnvVars: Record<string, string>;
+    dockerfilePath: string | null;
+    buildSettings: Record<string, unknown>;
+    gitRemoteUrl: string | null;
+    gitBranch: string | null;
+    autoCommit: boolean;
+  } }>(`/api/sessions/${sessionId}/settings`);
+  return data.settings;
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  await request<void>(`/api/sessions/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchMessages(sessionId: string): Promise<Message[]> {
+  const data = await request<ListMessagesResponse>(
+    `/api/sessions/${sessionId}/messages`,
+  );
+  return data.messages.map((message) => normalizeMessage(message));
+}
+
+export async function* streamPostMessage(
+  sessionId: string,
+  payload: {
+    content: string;
+    attachments?: AttachmentUpload[];
+  },
+): AsyncGenerator<PostMessageStreamEvent> {
+  const response = await fetch(`/api/sessions/${sessionId}/messages`, {
+    method: "POST",
+    headers: {
+      Accept: "application/x-ndjson",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    let errorBody: unknown = null;
+    const contentType = response.headers.get("Content-Type") ?? "";
+    if (contentType.includes("application/json")) {
+      try {
+        errorBody = await response.json();
+      } catch {
+        errorBody = null;
+      }
+    } else {
+      try {
+        const text = await response.text();
+        errorBody = text.length > 0 ? { message: text } : null;
+      } catch {
+        errorBody = null;
+      }
+    }
+    throw new ApiError(response.status, errorBody);
+  }
+
+  if (!response.body) {
+    throw new Error(
+      "Streaming responses are not supported in this environment.",
+    );
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const decoderAny: { decode: (...args: any[]) => string } =
+    decoder as unknown as { decode: (...args: any[]) => string };
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        buffer += decoderAny.decode();
+        break;
+      }
+
+      const chunkText = decoderAny.decode(value, { stream: true });
+      buffer += chunkText;
+
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex !== -1) {
+        const rawLine = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        const line = rawLine.trim();
+        if (line.length > 0) {
+          let parsed: PostMessageStreamEvent;
+          try {
+            parsed = JSON.parse(line) as PostMessageStreamEvent;
+          } catch (error) {
+            throw new Error(`Failed to parse stream event: ${line}`);
+          }
+          yield parsed;
+        }
+        newlineIndex = buffer.indexOf("\n");
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const remaining = buffer.trim();
+  if (remaining.length > 0) {
+    let parsed: PostMessageStreamEvent;
+    try {
+      parsed = JSON.parse(remaining) as PostMessageStreamEvent;
+    } catch (error) {
+      throw new Error(`Failed to parse stream event: ${remaining}`);
+    }
+    yield parsed;
+  }
+}
+
+export async function fetchSessionWorkspaceInfo(
+  sessionId: string,
+): Promise<SessionWorkspaceInfo> {
+  const data = await request<{ workspace: SessionWorkspaceInfo }>(
+    `/api/sessions/${sessionId}/workspace`,
+  );
+  return data.workspace;
+}
+
+export async function updateSessionTitle(
+  sessionId: string,
+  title: string,
+): Promise<Session> {
+  const response = await request<{ session: Session }>(
+    `/api/sessions/${sessionId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    },
+  );
+  return response.session;
+}
+
+export async function setSessionTitleLock(
+  sessionId: string,
+  locked: boolean,
+): Promise<Session> {
+  const response = await request<{ session: Session }>(
+    `/api/sessions/${sessionId}/title/lock`,
+    {
+      method: "POST",
+      body: JSON.stringify({ locked }),
+    },
+  );
+  return response.session;
+}
+
+export async function setSessionAutoCommit(
+  sessionId: string,
+  enabled: boolean,
+): Promise<{ autoCommit: boolean }> {
+  const response = await request<{ settings: { autoCommit: boolean } }>(
+    `/api/sessions/${sessionId}/auto-commit`,
+    {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    },
+  );
+  return { autoCommit: response.settings.autoCommit };
+}
+
+export async function fetchDeployConfig(): Promise<DeployConfigResult> {
+  const data = await request<DeployConfigResult>("/api/deploy/config");
+  return data;
+}
+
+export async function updateDeployConfig(
+  payload: DeployConfigPayload,
+): Promise<DeployConfigResult> {
+  const data = await request<DeployConfigResult>("/api/deploy/config", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+  return data;
+}
+
+export async function testDeployConnection(
+  params?: { apiKey?: string; baseUrl?: string; authMethod?: string },
+): Promise<DeployTestResponse> {
+  try {
+    const data = await request<DeployTestResponse>("/api/deploy/test", {
+      method: "POST",
+      body: JSON.stringify(params || {}),
+    });
+    return data;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      const errorBody = error.body as { error?: unknown } | undefined;
+      return {
+        ok: false,
+        error:
+          errorBody && typeof errorBody.error === "string"
+            ? errorBody.error
+            : error.message,
+      };
+    }
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export async function syncDeployConfig(): Promise<DeployConfigResult> {
+  const data = await request<DeployConfigResult>("/api/deploy/sync", {
+    method: "POST",
+  });
+  return data;
+}
+
+export async function triggerDeployment(): Promise<{ ok: boolean; result: unknown }> {
+  const data = await request<{ ok: boolean; result: unknown }>("/api/deploy/deploy", {
+    method: "POST",
+  });
+  return data;
+}
+
+export async function fetchDokployProjects(): Promise<DeployProjectsResponse> {
+  const data = await request<DeployProjectsResponse>("/api/deploy/projects");
+  return data;
+}
+
+export async function fetchDokployApplications(
+  projectId?: string,
+): Promise<DeployApplicationsResponse> {
+  const url = projectId
+    ? `/api/deploy/applications?projectId=${encodeURIComponent(projectId)}`
+    : "/api/deploy/applications";
+  const data = await request<DeployApplicationsResponse>(url);
+  return data;
+}
+
+export async function uploadWorkspaceArtifact(
+  workspaceRoot?: string,
+): Promise<DeployUploadResponse> {
+  const body = workspaceRoot ? { workspaceRoot } : {};
+  const data = await request<DeployUploadResponse>("/api/deploy/upload", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  return data;
+}
+
+export type AutoTitleMessagePayload = {
+  role: string;
+  content?: string;
+  attachments?: Array<{ filename?: string; mimeType?: string; size?: number }>;
+  items?: unknown[];
+};
+
+export async function autoUpdateSessionTitle(
+  sessionId: string,
+  messages: AutoTitleMessagePayload[],
+): Promise<Session> {
+  const response = await request<{ session: Session }>(
+    `/api/sessions/${sessionId}/title/auto`,
+    {
+      method: "POST",
+      body: JSON.stringify({ messages }),
+    },
+  );
+  return response.session;
+}
+
+export async function updateSessionWorkspacePath(
+  sessionId: string,
+  nextPath: string,
+): Promise<{ workspace: SessionWorkspaceInfo; session: Session }> {
+  return request<{ workspace: SessionWorkspaceInfo; session: Session }>(
+    `/api/sessions/${sessionId}/workspace`,
+    {
+      method: "POST",
+      body: JSON.stringify({ path: nextPath }),
+    },
+  );
+}
+
+export async function browseSessionWorkspaceDirectories(
+  sessionId: string,
+  path?: string,
+): Promise<BrowseWorkspaceResponse> {
+  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  return request<BrowseWorkspaceResponse>(
+    `/api/sessions/${sessionId}/workspace/browse${query}`,
+  );
+}
+
+export async function postMessage(
+  sessionId: string,
+  payload: {
+    content: string;
+    attachments?: AttachmentUpload[];
+  },
+): Promise<PostMessageSuccessResponse> {
+  return request<PostMessageSuccessResponse>(
+    `/api/sessions/${sessionId}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export type PostMessageResult =
+  | { status: "ok"; data: PostMessageSuccessResponse }
+  | { status: "error"; error: ApiError<PostMessageErrorResponse> };
+
+export async function safePostMessage(
+  sessionId: string,
+  payload: {
+    content: string;
+    attachments?: AttachmentUpload[];
+  },
+): Promise<PostMessageResult> {
+  try {
+    const data = await postMessage(sessionId, payload);
+    const normalized = {
+      ...data,
+      userMessage: normalizeMessage(data.userMessage),
+      assistantMessage: (() => {
+        const assistant = normalizeMessage(data.assistantMessage);
+        assistant.items = data.items ?? [];
+        return assistant;
+      })(),
+    };
+    return { status: "ok", data: normalized };
+  } catch (error) {
+    if (error instanceof ApiError && error.body) {
+      return { status: "error", error };
+    }
+    throw error;
+  }
+}
+
+export async function fetchWorkspaceFiles(
+  sessionId: string,
+): Promise<WorkspaceFile[]> {
+  const data = await request<ListWorkspaceFilesResponse>(
+    `/api/sessions/${sessionId}/files`,
+  );
+  return data.files;
+}
+
+export async function fetchWorkspaceFileContent(
+  sessionId: string,
+  filePath: string,
+): Promise<WorkspaceFileContent> {
+  const params = new URLSearchParams({ path: filePath });
+  const data = await request<WorkspaceFileContentResponse>(
+    `/api/sessions/${sessionId}/files/content?${params.toString()}`,
+  );
+  return data.file;
+}
+
+export async function saveWorkspaceFile(
+  sessionId: string,
+  payload: { path: string; content: string },
+): Promise<WorkspaceFileContent> {
+  const data = await request<WorkspaceFileContentResponse>(
+    `/api/sessions/${sessionId}/files/content`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    },
+  );
+
+  return data.file;
+}
+
+// GitHub OAuth
+export async function initiateGitHubAuth(): Promise<{ url: string }> {
+  return await request<{ url: string }>("/api/auth/github/authorize");
+}
+
+export async function getGitHubConnectionStatus(): Promise<{
+  connected: boolean;
+  hasToken: boolean;
+}> {
+  return await request<{ connected: boolean; hasToken: boolean }>(
+    "/api/auth/github/status",
+  );
+}
+
+export async function disconnectGitHub(): Promise<{ success: boolean }> {
+  return await request<{ success: boolean }>("/api/auth/github", {
+    method: "DELETE",
+  });
+}
