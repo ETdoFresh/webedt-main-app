@@ -9,7 +9,7 @@ import GitHubConnectionPanel from "./components/GitHubConnectionPanel";
 import NewSessionModal from "./components/NewSessionModal";
 import DeploymentLogs from "./components/DeploymentLogs";
 import { createSession, deleteSession, fetchSessions } from "./api/client";
-import type { Session } from "@codex-webapp/shared";
+import type { Session } from "@shared";
 
 const TAGLINES = [
   "webedt - (wĕb ĕd′-ĭt)",

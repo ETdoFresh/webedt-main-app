@@ -1,5 +1,5 @@
 {
-  "name": "@codex-webapp/main-app",
+  "name": "webedt-main-app",
   "version": "0.3.0",
   "private": true,
   "type": "module",
@@ -18,7 +18,6 @@
     "uninstall": "rimraf node_modules"
   },
   "dependencies": {
-    "@codex-webapp/shared": "*",
     "@anthropic-ai/claude-agent-sdk": "^0.1.28",
     "@openai/codex-sdk": "^0.46.0",
     "better-sqlite3": "^11.10.0",

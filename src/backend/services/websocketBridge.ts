@@ -2,7 +2,7 @@ import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import { parse as parseUrl } from "node:url";
 import { validateSessionToken } from "./sessionTokenService";
-import type { StreamChunk } from "@codex-webapp/shared";
+import type { StreamChunk } from "@shared";
 
 type ClientConnection = {
   ws: WebSocket;

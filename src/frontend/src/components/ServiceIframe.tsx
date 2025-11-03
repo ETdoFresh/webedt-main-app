@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import type { ServiceToMainMessage, MainToServiceMessage } from "@codex-webapp/shared";
+import type { ServiceToMainMessage, MainToServiceMessage } from "@shared";
 
 type ServiceIframeProps = {
   serviceUrl: string;

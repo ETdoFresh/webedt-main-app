@@ -1,4 +1,4 @@
-import type { Session } from "@codex-webapp/shared";
+import type { Session } from "@shared";
 
 type SessionListProps = {
   sessions: Session[];

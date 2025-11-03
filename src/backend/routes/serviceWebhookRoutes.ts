@@ -7,7 +7,7 @@ import {
   extractTokenFromHeader,
 } from "../services/sessionTokenService";
 import { messageToResponse } from "../types/api";
-import type { WebhookMessagePayload } from "@codex-webapp/shared";
+import type { WebhookMessagePayload } from "@shared";
 
 const router = Router();
 
