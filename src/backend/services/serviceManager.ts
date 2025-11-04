@@ -142,9 +142,9 @@ export async function createService(
       },
     });
 
-    // Always configure container-app from codex-webapp repository
+    // Always configure container-app from webedt-service-app repository
     // The user's repo URL is passed as GITHUB_REPO_URL env var (set above)
-    console.log('[SERVICE] Configuring container-app from codex-webapp repository');
+    console.log('[SERVICE] Configuring container-app from webedt-service-app repository');
 
     await client.request({
       method: "POST",
@@ -152,10 +152,10 @@ export async function createService(
       body: {
         applicationId,
         owner: "ETdoFresh",
-        repository: "codex-webapp",
+        repository: "webedt-service-app",
         githubId: globalConfig.githubId || null,
         branch: "main",
-        buildPath: "", // Use root of repo to access full monorepo structure
+        buildPath: "",
       },
     });
 
