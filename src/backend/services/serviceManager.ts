@@ -166,7 +166,7 @@ export async function createService(
       body: {
         applicationId,
         buildType: "dockerfile",
-        dockerfile: "Dockerfile.container-app", // Root-level Dockerfile for monorepo build
+        dockerfile: "Dockerfile", // Root-level Dockerfile for monorepo build
         dockerContextPath: "./",
         dockerBuildStage: "",
       },
