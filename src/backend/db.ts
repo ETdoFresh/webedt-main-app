@@ -1405,11 +1405,16 @@ class SQLiteDatabase implements IDatabase {
       };
     }
 
+    // Fall back to environment variable if baseUrl is empty
+    if (!parsed.baseUrl || parsed.baseUrl.trim().length === 0) {
+      parsed.baseUrl = process.env.DOKPLOY_BASE_URL || "";
+    }
+
     return {
       id: row.id,
       config: parsed,
       updatedAt: row.updated_at,
-      hasApiKey: Boolean(row.api_key_cipher),
+      hasApiKey: Boolean(row.api_key_cipher) || Boolean(process.env.DOKPLOY_API_KEY),
       apiKeyCipher: row.api_key_cipher,
       apiKeyIv: row.api_key_iv,
       apiKeyTag: row.api_key_tag,
@@ -1466,10 +1471,18 @@ class SQLiteDatabase implements IDatabase {
   getDeployApiKey(): string | null {
     const row = this.getDeployConfigStmt.get();
     if (!row) {
-      return null;
+      // Fall back to environment variable if no database config exists
+      return process.env.DOKPLOY_API_KEY || null;
     }
 
-    return decryptSecret(row.api_key_cipher ?? null, row.api_key_iv, row.api_key_tag);
+    const dbApiKey = decryptSecret(row.api_key_cipher ?? null, row.api_key_iv, row.api_key_tag);
+
+    // If database has no API key, fall back to environment variable
+    if (!dbApiKey || dbApiKey.trim().length === 0) {
+      return process.env.DOKPLOY_API_KEY || null;
+    }
+
+    return dbApiKey;
   }
 
   createUser(input: {
