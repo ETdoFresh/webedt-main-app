@@ -194,7 +194,7 @@ export async function createService(
       body: {
         host: domainHost,
         path: `/${sessionId}`,
-        port: 3001, // container-app runs on port 3001
+        port: 3000,
         https: true,
         certificateType: "letsencrypt",
         applicationId,
