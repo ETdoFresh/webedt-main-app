@@ -203,8 +203,8 @@ export async function createService(
       },
     });
 
-    // Generate service URL with the configured domain (trailing slash ensures relative asset paths resolve correctly)
-    const serviceUrl = `https://${domainHost}/${sessionId}/`;
+    // Generate service URL with the configured domain
+    const serviceUrl = `https://${domainHost}/${sessionId}`;
 
     // Update service record with success
     database.upsertSessionService({
