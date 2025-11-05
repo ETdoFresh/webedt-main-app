@@ -199,7 +199,7 @@ export async function createService(
         certificateType: "letsencrypt",
         applicationId,
         domainType: "application",
-        stripPath: true,
+        stripPath: false,
       },
     });
 
