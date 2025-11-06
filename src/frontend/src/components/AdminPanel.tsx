@@ -28,6 +28,13 @@ const providerLabels: Record<ProviderKey, string> = {
   copilot: "Copilot CLI",
 };
 
+const providerFileNames: Record<ProviderKey, string> = {
+  codex: ".codex/auth.json",
+  claude: ".claude/.credentials.json",
+  droid: ".droid/auth.json",
+  copilot: ".config/github-copilot/apps.json",
+};
+
 const AdminPanel = () => {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<AuthUser[]>([]);
@@ -240,7 +247,7 @@ const AdminPanel = () => {
     setAuthEditorSaving(false);
     setAuthEditorLoading(Boolean(fileName));
     setAuthEditorTarget({ provider, fileName });
-    setAuthEditorFileName(fileName ?? "");
+    setAuthEditorFileName(fileName ?? providerFileNames[provider]);
 
     if (!fileName) {
       setAuthEditorContent("{}");
@@ -264,16 +271,7 @@ const AdminPanel = () => {
       return;
     }
 
-    const fileName = authEditorTarget.fileName ?? authEditorFileName.trim();
-    if (!fileName) {
-      setAuthEditorError("File name is required.");
-      return;
-    }
-
-    if (!/^[\w.-]+$/.test(fileName)) {
-      setAuthEditorError("File name may only include letters, numbers, dots, hyphens, and underscores.");
-      return;
-    }
+    const fileName = authEditorTarget.fileName ?? providerFileNames[authEditorTarget.provider];
 
     const trimmed = authEditorContent.trim();
     if (trimmed.length === 0) {
@@ -563,9 +561,8 @@ const AdminPanel = () => {
                               File name
                               <input
                                 type="text"
-                                value={authEditorTarget?.fileName ? authEditorTarget.fileName : authEditorFileName}
-                                onChange={(event) => setAuthEditorFileName(event.target.value)}
-                                disabled={Boolean(authEditorTarget?.fileName)}
+                                value={authEditorFileName}
+                                disabled={true}
                               />
                             </label>
                             {authEditorLoading ? (

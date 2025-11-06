@@ -184,6 +184,17 @@ export async function createService(
       },
     });
 
+    // Configure Docker Swarm placement constraints to deploy on worker node
+    console.log('[SERVICE] Configuring Docker Swarm placement to worker node');
+    await client.request({
+      method: "POST",
+      path: "/application.saveAdvanced",
+      body: {
+        applicationId,
+        placementConstraints: "node.role==worker",
+      },
+    });
+
     // Configure domain with HTTPS and Let's Encrypt
     const domainHost = process.env.DOKPLOY_DOMAIN_HOST || "codex-webapp.etdofresh.com";
     console.log(`[SERVICE] Creating domain for ${sessionId} on ${domainHost}`);

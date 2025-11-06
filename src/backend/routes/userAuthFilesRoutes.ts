@@ -13,7 +13,7 @@ const fileNameSchema = z
   .trim()
   .min(1)
   .max(120)
-  .regex(/^[\w.-]+$/, "Invalid file name");
+  .regex(/^[\w.\/-]+$/, "Invalid file name");
 
 const saveAuthFileSchema = z.object({
   content: z.string().min(2, "Content must not be empty"),
