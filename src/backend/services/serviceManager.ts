@@ -3,6 +3,11 @@ import { createDokployClient } from "./dokployClient";
 import type { DeployConfig } from "../../shared/dokploy";
 import type { SessionSettingsRecord } from "../types/database";
 import { generateSessionToken } from "./sessionTokenService";
+import {
+  selectWorkerNode,
+  createVolumeOnWorkerNode,
+  deleteVolumeOnWorkerNode,
+} from "./dockerSwarmVolumeHelper";
 
 type CreateServiceOptions = {
   sessionId: string;
@@ -106,6 +111,67 @@ export async function createService(
       throw new Error("Dokploy did not return an applicationId");
     }
 
+    // ============================================
+    // VOLUME-BASED DEPLOYMENT SETUP
+    // ============================================
+    console.log('[SERVICE] Setting up volume-based deployment...');
+
+    // 1. Select worker node for this session
+    const workerNode = await selectWorkerNode();
+    console.log(`[SERVICE] Selected worker node: ${workerNode} for session ${sessionId}`);
+
+    // 2. Create session volume on worker node
+    const volumeName = `session-${sessionId}`;
+    await createVolumeOnWorkerNode(volumeName, workerNode);
+    console.log(`[SERVICE] Created session volume: ${volumeName} on ${workerNode}`);
+
+    // 3. Mount editor volume (read-only) at /app
+    console.log('[SERVICE] Mounting editor volume at /app (read-only)...');
+    const editorMountResult = await client.request<{ mountId?: string }>({
+      method: "POST",
+      path: "/mounts.create",
+      body: {
+        type: "volume",
+        volumeName: "webedt-editor-volume",
+        mountPath: "/app",
+        serviceId: applicationId,
+        serviceType: "application",
+      },
+    });
+    const editorMountId = editorMountResult?.mountId ?? null;
+    console.log(`[SERVICE] Editor volume mounted (mountId: ${editorMountId})`);
+
+    // 4. Mount session volume (read-write) at /workspace
+    console.log(`[SERVICE] Mounting session volume at /workspace (read-write)...`);
+    const sessionMountResult = await client.request<{ mountId?: string }>({
+      method: "POST",
+      path: "/mounts.create",
+      body: {
+        type: "volume",
+        volumeName: volumeName,
+        mountPath: "/workspace",
+        serviceId: applicationId,
+        serviceType: "application",
+      },
+    });
+    const sessionMountId = sessionMountResult?.mountId ?? null;
+    console.log(`[SERVICE] Session volume mounted (mountId: ${sessionMountId})`);
+
+    // 5. Save volume info to database
+    database.updateSessionServiceVolumes({
+      sessionId,
+      volumeName,
+      workerNode,
+      editorMountId: editorMountId ?? undefined,
+      sessionMountId: sessionMountId ?? undefined,
+      usesVolumes: true,
+    });
+    console.log('[SERVICE] Volume information saved to database');
+
+    // ============================================
+    // END VOLUME SETUP
+    // ============================================
+
     // Determine main app URL
     const mainAppUrl = process.env.MAIN_APP_URL || "http://localhost:3000";
     const mainAppWsUrl = process.env.MAIN_APP_WS_URL || mainAppUrl.replace(/^http/, "ws");
@@ -159,14 +225,14 @@ export async function createService(
       },
     });
 
-    // Use Dockerfile build type pointing to root-level container-app Dockerfile
+    // Use minimal Dockerfile for volume-based deployment
     await client.request({
       method: "POST",
       path: "/application.saveBuildType",
       body: {
         applicationId,
         buildType: "dockerfile",
-        dockerfile: "Dockerfile", // Root-level Dockerfile for monorepo build
+        dockerfile: "Dockerfile.minimal", // Minimal Dockerfile (no build, uses volumes)
         dockerContextPath: "./",
         dockerBuildStage: "",
       },
@@ -184,14 +250,15 @@ export async function createService(
       },
     });
 
-    // Configure Docker Swarm placement constraints to deploy on worker node
-    console.log('[SERVICE] Configuring Docker Swarm placement to worker node');
+    // Configure Docker Swarm placement constraints to pin to specific worker node
+    // This ensures the container runs on the same node where the volumes are created
+    console.log(`[SERVICE] Pinning container to worker node: ${workerNode}`);
     await client.request({
       method: "POST",
       path: "/application.saveAdvanced",
       body: {
         applicationId,
-        placementConstraints: "node.role==worker",
+        placementConstraints: `node.role==worker && node.hostname==${workerNode}`,
       },
     });
 
@@ -345,6 +412,7 @@ export async function deleteService(
 
   const client = createDokployClient(globalConfig, apiKey);
 
+  // Delete Dokploy application (this automatically removes mounts)
   await client.request({
     method: "DELETE",
     path: "/application.delete",
@@ -353,6 +421,19 @@ export async function deleteService(
     },
   });
 
+  // Clean up session volume from worker node
+  if (service.volumeName && service.workerNode) {
+    console.log(`[SERVICE] Deleting volume ${service.volumeName} from worker node ${service.workerNode}`);
+    try {
+      await deleteVolumeOnWorkerNode(service.volumeName, service.workerNode);
+      console.log(`[SERVICE] ✓ Volume deleted successfully`);
+    } catch (error) {
+      console.warn(`[SERVICE] ⚠ Failed to delete volume ${service.volumeName}:`, error);
+      // Don't fail the whole operation if volume deletion fails
+    }
+  }
+
+  // Remove database record
   database.deleteSessionService(sessionId);
 }
 

@@ -10,6 +10,14 @@ import {
   getArtifactPath,
 } from "../services/workspaceArchiveService";
 import { requireAdmin } from "../middleware/auth";
+import {
+  createEditorVolumeOnAllWorkers,
+  updateEditorVolumeOnAllWorkers,
+  getEditorVolumeStatus,
+  findOrphanedVolumes,
+  cleanupOrphanedVolumes,
+  getStorageWorkerNodes,
+} from "../services/dockerSwarmVolumeHelper";
 
 const router = Router();
 router.use(requireAdmin);
@@ -482,6 +490,153 @@ router.get("/deploy/artifacts/:key", (req: Request, res: Response) => {
   } catch (error) {
     res.status(400).json({
       error: error instanceof Error ? error.message : "Invalid artifact key.",
+    });
+  }
+});
+
+// ============================================
+// VOLUME MANAGEMENT ENDPOINTS
+// ============================================
+
+/**
+ * Get list of storage-enabled worker nodes
+ */
+router.get("/deploy/volumes/worker-nodes", async (_req: Request, res: Response) => {
+  try {
+    const nodes = await getStorageWorkerNodes();
+    res.json({
+      nodes: nodes.map(n => ({
+        hostname: n.hostname,
+        id: n.id,
+        availability: n.availability,
+      })),
+      count: nodes.length,
+    });
+  } catch (error) {
+    console.error("Failed to get worker nodes:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to get worker nodes",
+    });
+  }
+});
+
+/**
+ * Get editor volume status across all worker nodes
+ */
+router.get("/deploy/volumes/editor/status", async (_req: Request, res: Response) => {
+  try {
+    const status = await getEditorVolumeStatus();
+    res.json(status);
+  } catch (error) {
+    console.error("Failed to get editor volume status:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to get editor volume status",
+    });
+  }
+});
+
+/**
+ * Create editor volume on all worker nodes
+ * This is a one-time setup operation
+ */
+router.post("/deploy/volumes/editor/setup", async (_req: Request, res: Response) => {
+  try {
+    console.log("[ADMIN] Starting editor volume setup on all worker nodes...");
+    await createEditorVolumeOnAllWorkers();
+    const status = await getEditorVolumeStatus();
+
+    res.json({
+      message: "Editor volume setup complete",
+      status,
+    });
+  } catch (error) {
+    console.error("Failed to setup editor volumes:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to setup editor volumes",
+    });
+  }
+});
+
+/**
+ * Update editor volume on all worker nodes (pull latest code)
+ */
+router.post("/deploy/volumes/editor/update", async (_req: Request, res: Response) => {
+  try {
+    console.log("[ADMIN] Updating editor volumes on all worker nodes...");
+    await updateEditorVolumeOnAllWorkers();
+    const status = await getEditorVolumeStatus();
+
+    res.json({
+      message: "Editor volumes updated successfully",
+      status,
+    });
+  } catch (error) {
+    console.error("Failed to update editor volumes:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to update editor volumes",
+    });
+  }
+});
+
+/**
+ * Find orphaned session volumes (volumes without database records)
+ */
+router.get("/deploy/volumes/orphaned", async (_req: Request, res: Response) => {
+  try {
+    // Get all active session IDs from database
+    const sessions = database.listSessions(""); // Empty userId gets all sessions (admin)
+    const activeSessionIds = new Set(sessions.map(s => s.id));
+
+    const orphanedByNode = await findOrphanedVolumes(activeSessionIds);
+
+    // Convert Map to object for JSON response
+    const orphanedVolumes: Record<string, string[]> = {};
+    let totalOrphaned = 0;
+
+    for (const [node, volumes] of orphanedByNode.entries()) {
+      orphanedVolumes[node] = volumes;
+      totalOrphaned += volumes.length;
+    }
+
+    res.json({
+      orphanedVolumes,
+      totalOrphaned,
+      nodeCount: orphanedByNode.size,
+    });
+  } catch (error) {
+    console.error("Failed to find orphaned volumes:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to find orphaned volumes",
+    });
+  }
+});
+
+/**
+ * Cleanup orphaned session volumes
+ */
+router.post("/deploy/volumes/cleanup", async (_req: Request, res: Response) => {
+  try {
+    // Get all active session IDs from database
+    const sessions = database.listSessions(""); // Empty userId gets all sessions (admin)
+    const activeSessionIds = new Set(sessions.map(s => s.id));
+
+    console.log("[ADMIN] Finding orphaned volumes...");
+    const orphanedByNode = await findOrphanedVolumes(activeSessionIds);
+
+    console.log("[ADMIN] Cleaning up orphaned volumes...");
+    const result = await cleanupOrphanedVolumes(orphanedByNode);
+
+    res.json({
+      message: "Cleanup complete",
+      deleted: result.deleted,
+      errors: result.errors,
+      deletedCount: result.deleted.length,
+      errorCount: result.errors.length,
+    });
+  } catch (error) {
+    console.error("Failed to cleanup orphaned volumes:", error);
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to cleanup orphaned volumes",
     });
   }
 });

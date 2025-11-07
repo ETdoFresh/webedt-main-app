@@ -93,6 +93,12 @@ export type SessionServiceRecord = {
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
+  // Volume-based deployment tracking
+  volumeName: string | null;
+  workerNode: string | null;
+  editorMountId: string | null;
+  sessionMountId: string | null;
+  usesVolumes: boolean;
 };
 
 export type SessionSettingsRecord = {

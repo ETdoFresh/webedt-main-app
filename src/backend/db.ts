@@ -291,6 +291,31 @@ const migrations: string[] = [
 `,
   `
   CREATE UNIQUE INDEX IF NOT EXISTS idx_github_oauth_user ON github_oauth_tokens(user_id)
+`,
+  // Add volume tracking for Docker Swarm worker nodes
+  `
+  ALTER TABLE session_containers ADD COLUMN volume_name TEXT
+`,
+  `
+  ALTER TABLE session_containers ADD COLUMN worker_node TEXT
+`,
+  `
+  ALTER TABLE session_containers ADD COLUMN editor_mount_id TEXT
+`,
+  `
+  ALTER TABLE session_containers ADD COLUMN session_mount_id TEXT
+`,
+  `
+  ALTER TABLE session_containers ADD COLUMN uses_volumes INTEGER DEFAULT 0
+`,
+  `
+  CREATE INDEX IF NOT EXISTS idx_session_containers_volume ON session_containers(volume_name)
+`,
+  `
+  CREATE INDEX IF NOT EXISTS idx_session_containers_worker_node ON session_containers(worker_node)
+`,
+  `
+  CREATE INDEX IF NOT EXISTS idx_session_containers_uses_volumes ON session_containers(uses_volumes)
 `
 ];
 
@@ -938,7 +963,12 @@ class SQLiteDatabase implements IDatabase {
         status,
         error_message,
         created_at,
-        updated_at
+        updated_at,
+        volume_name,
+        worker_node,
+        editor_mount_id,
+        session_mount_id,
+        COALESCE(uses_volumes, 0) as uses_volumes
       FROM session_containers
       WHERE session_id = @sessionId
     `);
@@ -1863,12 +1893,55 @@ class SQLiteDatabase implements IDatabase {
       errorMessage: row.error_message,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      volumeName: row.volume_name ?? null,
+      workerNode: row.worker_node ?? null,
+      editorMountId: row.editor_mount_id ?? null,
+      sessionMountId: row.session_mount_id ?? null,
+      usesVolumes: Boolean(row.uses_volumes),
     };
   }
 
   deleteSessionService(sessionId: string): boolean {
     const result = this.deleteSessionServiceStmt.run({ sessionId });
     return result.changes > 0;
+  }
+
+  updateSessionServiceVolumes(input: {
+    sessionId: string;
+    volumeName?: string | null;
+    workerNode?: string | null;
+    editorMountId?: string | null;
+    sessionMountId?: string | null;
+    usesVolumes?: boolean;
+  }): void {
+    const existing = this.getSessionService(input.sessionId);
+    if (!existing) {
+      throw new Error(`Session service not found: ${input.sessionId}`);
+    }
+
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `
+      UPDATE session_containers
+      SET volume_name = COALESCE(@volumeName, volume_name),
+          worker_node = COALESCE(@workerNode, worker_node),
+          editor_mount_id = COALESCE(@editorMountId, editor_mount_id),
+          session_mount_id = COALESCE(@sessionMountId, session_mount_id),
+          uses_volumes = COALESCE(@usesVolumes, uses_volumes),
+          updated_at = @updatedAt
+      WHERE session_id = @sessionId
+    `
+      )
+      .run({
+        sessionId: input.sessionId,
+        volumeName: input.volumeName ?? null,
+        workerNode: input.workerNode ?? null,
+        editorMountId: input.editorMountId ?? null,
+        sessionMountId: input.sessionMountId ?? null,
+        usesVolumes: input.usesVolumes !== undefined ? (input.usesVolumes ? 1 : 0) : null,
+        updatedAt: now,
+      });
   }
 
   upsertSessionSettings(input: {
